@@ -37,8 +37,7 @@ pub struct CPU {
     v_registers: [u8; NUM_V_REGISTERS],
     index_register: u16,
     stack: [u16; STACK_SIZE],
-    // NOTE: change this if it needs to be a u16 but I don't see why u8 wouldn't work
-    stack_pointer: u8,
+    stack_pointer: u16,
     keys: [bool; NUM_KEYS],
     delay_timer: u8,
     sound_timer: u8,
@@ -169,7 +168,70 @@ impl CPU {
 
                 self.v_registers[vx] = self.v_registers[vy];
             }
-            (_, _, _, _) => panic!("unknown opcode: {}", op),
+            // VX |= VY
+            (8, _, _, 1) => {
+                let vx = digit_two as usize;
+                let vy = digit_three as usize;
+
+                self.v_registers[vx] |= self.v_registers[vy];
+            }
+            // VX &= VY
+            (8, _, _, 2) => {
+                let vx = digit_two as usize;
+                let vy = digit_three as usize;
+
+                self.v_registers[vx] &= self.v_registers[vy];
+            }
+            // VX ^= VY
+            (8, _, _, 3) => {
+                let vx = digit_two as usize;
+                let vy = digit_three as usize;
+
+                self.v_registers[vx] ^= self.v_registers[vy];
+            }
+            // VX += VY - VX -> VX + VY
+            (8, _, _, 4) => {
+                let vx = digit_two as usize;
+                let vy = digit_three as usize;
+
+                let (result, overflow) = self.v_registers[vx].overflowing_add(self.v_registers[vy]);
+
+                // set carry flag
+                self.v_registers[0xF] = if overflow { 1 } else { 0 };
+                self.v_registers[vx] = result;
+            }
+            // VX -= VY - VX -> VX - VY
+            (8, _, _, 5) => {
+                let vx = digit_two as usize;
+                let vy = digit_three as usize;
+
+                let (result, underflow) =
+                    self.v_registers[vx].overflowing_sub(self.v_registers[vy]);
+
+                self.v_registers[0xF] = if underflow { 0 } else { 1 };
+                self.v_registers[vx] = result;
+            }
+            // VX >> 1
+            (8, _, _, 6) => {
+                let vx = digit_two as usize;
+                // the flag register is set to the LSB
+                let rightmost_bit = self.v_registers[vx] & 1;
+
+                self.v_registers[vx] >>= 1;
+                self.v_registers[0xF] = rightmost_bit;
+            }
+            // VX = VY - VX
+            (8, _, _, 7) => {
+                let vx = digit_two as usize;
+                let vy = digit_three as usize;
+
+                let (result, underflow) =
+                    self.v_registers[vy].overflowing_sub(self.v_registers[vx]);
+
+                self.v_registers[0xF] = if underflow { 0 } else { 1 };
+                self.v_registers[vx] = result;
+            }
+            (_, _, _, _) => panic!("unknown opcode: {:#x}", op),
         }
     }
 
@@ -193,7 +255,7 @@ impl CPU {
         self.stack[self.stack_pointer as usize] = val;
         self.stack_pointer += 1;
 
-        if self.stack_pointer > STACK_SIZE as u8 {
+        if self.stack_pointer > STACK_SIZE as u16 {
             panic!("stack overflow... HE SAID THE THING");
         }
     }
@@ -313,5 +375,100 @@ mod tests {
         cpu.v_registers[3] = 255;
         cpu.execute(0x7302);
         assert_eq!(cpu.v_registers[3], 1);
+    }
+
+    #[test]
+    fn test_vx_or_vy() {
+        let mut cpu = CPU::new();
+
+        cpu.v_registers[5] = 0b1010_1010;
+        cpu.v_registers[0xA] = 0b0101_0101;
+        cpu.execute(0x85A1);
+        assert_eq!(cpu.v_registers[5], 0xFF);
+    }
+
+    #[test]
+    fn test_vx_and_vy() {
+        let mut cpu = CPU::new();
+
+        cpu.v_registers[8] = 0b1010_1010;
+        cpu.v_registers[2] = 0b0101_0101;
+        cpu.execute(0x8822);
+        assert_eq!(cpu.v_registers[8], 0x00);
+    }
+
+    #[test]
+    fn test_vx_xor_vy() {
+        let mut cpu = CPU::new();
+
+        cpu.v_registers[0xF] = 0b1110_1110;
+        cpu.v_registers[0] = 0b0111_0111;
+        cpu.execute(0x8F03);
+        assert_eq!(cpu.v_registers[0xF], 0b1001_1001);
+    }
+
+    #[test]
+    fn test_vx_add_vy() {
+        let mut cpu = CPU::new();
+
+        cpu.v_registers[0] = 255;
+        cpu.v_registers[1] = 1;
+        cpu.execute(0x8014);
+        assert_eq!(cpu.v_registers[0], 0);
+        assert_eq!(cpu.v_registers[0xF], 1);
+
+        cpu.v_registers[6] = 10;
+        cpu.v_registers[0xA] = 10;
+        cpu.execute(0x86A4);
+        assert_eq!(cpu.v_registers[6], 20);
+        assert_eq!(cpu.v_registers[0xF], 0);
+    }
+
+    #[test]
+    fn test_vx_sub_vy() {
+        let mut cpu = CPU::new();
+
+        cpu.v_registers[0] = 0;
+        cpu.v_registers[1] = 1;
+        cpu.execute(0x8015);
+        assert_eq!(cpu.v_registers[0], 255);
+        assert_eq!(cpu.v_registers[0xF], 0);
+
+        cpu.v_registers[6] = 10;
+        cpu.v_registers[0xA] = 10;
+        cpu.execute(0x86A5);
+        assert_eq!(cpu.v_registers[6], 0);
+        assert_eq!(cpu.v_registers[0xF], 1);
+    }
+
+    #[test]
+    fn test_vx_shift_right() {
+        let mut cpu = CPU::new();
+
+        cpu.v_registers[0] = 0b0101_0101;
+        cpu.execute(0x8006);
+        assert_eq!(cpu.v_registers[0], 0b0010_1010);
+        assert_eq!(cpu.v_registers[0xF], 1);
+
+        cpu.v_registers[0xB] = 0b1010_1010;
+        cpu.execute(0x8B06);
+        assert_eq!(cpu.v_registers[0xB], 0b0101_0101);
+        assert_eq!(cpu.v_registers[0xF], 0);
+    }
+
+    #[test]
+    fn test_vx_to_vy_minus_vx() {
+        let mut cpu = CPU::new();
+
+        cpu.v_registers[0] = 1;
+        cpu.execute(0x8017);
+        assert_eq!(cpu.v_registers[0], 255);
+        assert_eq!(cpu.v_registers[0xF], 0);
+
+        cpu.v_registers[0] = 0;
+        cpu.v_registers[1] = 1;
+        cpu.execute(0x8017);
+        assert_eq!(cpu.v_registers[0], 1);
+        assert_eq!(cpu.v_registers[0xF], 1);
     }
 }
