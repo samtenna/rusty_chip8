@@ -98,7 +98,39 @@ impl CPU {
         let digit_four = (op & 0x000F);
 
         match (digit_one, digit_two, digit_three, digit_four) {
-            (_, _, _, _) => todo!()
+            // NOP - no operation
+            (0, 0, 0, 0) => return,
+            // CLS - clear screen
+            (0, 0, 0xE, 0) => {
+                self.screen = [false; SCREEN_WIDTH * SCREEN_HEIGHT];
+            }
+            // RET - return from subroutine
+            (0, 0, 0xE, 0xE) => {
+                let return_address = self.pop();
+                self.pc = return_address;
+            }
+            // JMP nnn - jump
+            (1, _, _, _) => {
+                let address = op & 0x0FFF;
+                self.pc = address;
+            }
+            // CALL nnn - call subroutine
+            (2, _, _, _) => {
+                let address = op & 0x0FFF;
+                self.push(self.pc);
+                self.pc = address;
+            }
+            // SKIP VX == NN - skip next if VX == VN
+            (3, _, _, _) => {
+                let vx = digit_two as usize;
+                let nn = (op & 0x00FF) as u8;
+
+                if self.v_registers[vx] == nn {
+                    // instruction length is 2 bytes
+                    self.pc += 2;
+                }
+            }
+            (_, _, _, _) => panic!("unknown opcode: {}", op)
         }
     }
 
@@ -153,5 +185,54 @@ mod tests {
             cpu.pop();
         }
         assert_eq!(cpu.stack[0], 0);
+    }
+
+    // operations
+
+    #[test]
+    fn test_cls() {
+        let mut cpu = CPU::new();
+
+        cpu.screen = [true; SCREEN_WIDTH * SCREEN_HEIGHT];
+        cpu.execute(0x00E0);
+        assert_eq!(cpu.screen, [false; SCREEN_WIDTH * SCREEN_HEIGHT]);
+    }
+
+    #[test]
+    fn test_ret() {
+        let mut cpu = CPU::new();
+
+        cpu.push(0x69);
+        cpu.execute(0x00EE);
+        assert_eq!(cpu.pc, 0x69);
+    }
+
+    #[test]
+    fn test_jmp() {
+        let mut cpu = CPU::new();
+
+        cpu.execute(0x1420);
+        assert_eq!(cpu.pc, 0x420);
+    }
+
+    #[test]
+    fn test_call() {
+        let mut cpu = CPU::new();
+
+        cpu.pc = 0x69;
+        cpu.execute(0x2420);
+        assert_eq!(cpu.pop(), 0x69);
+        assert_eq!(cpu.pc, 0x420);
+    }
+
+    #[test]
+    fn test_vx_equal_nn() {
+        let mut cpu = CPU::new();
+
+        cpu.v_registers[5] = 0x69;
+        cpu.execute(0x3569);
+        assert_eq!(cpu.pc, START_ADDRESS + 2);
+        cpu.execute(0x3570);
+        assert_ne!(cpu.pc, START_ADDRESS + 4);
     }
 }
