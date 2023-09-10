@@ -69,13 +69,13 @@ impl CPU {
         self.memory = [0; MEMORY_SIZE];
         self.screen = [false; SCREEN_WIDTH * SCREEN_HEIGHT];
         self.v_registers = [0; NUM_V_REGISTERS];
-        self.index_register= 0;
-        self.stack_pointer= 0;
+        self.index_register = 0;
+        self.stack_pointer = 0;
         self.stack = [0; STACK_SIZE];
         self.keys = [false; NUM_KEYS];
-        self.delay_timer= 0;
-        self.sound_timer= 0;
-        
+        self.delay_timer = 0;
+        self.sound_timer = 0;
+
         self.memory[..FONTSET_SIZE].copy_from_slice(&FONTSET);
     }
 
@@ -130,7 +130,46 @@ impl CPU {
                     self.pc += 2;
                 }
             }
-            (_, _, _, _) => panic!("unknown opcode: {}", op)
+            // SKIP VX != NN - skip next if VX != VN
+            (4, _, _, _) => {
+                let vx = digit_two as usize;
+                let nn = (op & 0x00FF) as u8;
+
+                if self.v_registers[vx] != nn {
+                    self.pc += 2;
+                }
+            }
+            // SKIP VX == VY - skip next if VX == VY
+            (5, _, _, 0) => {
+                let vx = digit_two as usize;
+                let vy = digit_three as usize;
+
+                if self.v_registers[vx] == self.v_registers[vy] {
+                    self.pc += 2;
+                }
+            }
+            // VX = VN - set VX -> NN
+            (6, _, _, _) => {
+                let vx = digit_two as usize;
+                let nn = (op & 0x00FF) as u8;
+
+                self.v_registers[vx] = nn;
+            }
+            // VX += NN - set VX -> VX + NN
+            (7, _, _, _) => {
+                let vx = digit_two as usize;
+                let nn = (op & 0x00FF) as u8;
+
+                self.v_registers[vx] = self.v_registers[vx].wrapping_add(nn);
+            }
+            // VX = VY - set VX -> VY
+            (8, _, _, 0) => {
+                let vx = digit_two as usize;
+                let vy = digit_three as usize;
+
+                self.v_registers[vx] = self.v_registers[vy];
+            }
+            (_, _, _, _) => panic!("unknown opcode: {}", op),
         }
     }
 
@@ -143,7 +182,7 @@ impl CPU {
             if self.sound_timer == 1 {
                 // BEEP
             }
-            
+
             self.sound_timer -= 1;
         }
     }
@@ -226,13 +265,53 @@ mod tests {
     }
 
     #[test]
-    fn test_vx_equal_nn() {
+    fn test_skip_vx_equal_nn() {
         let mut cpu = CPU::new();
 
         cpu.v_registers[5] = 0x69;
         cpu.execute(0x3569);
         assert_eq!(cpu.pc, START_ADDRESS + 2);
         cpu.execute(0x3570);
-        assert_ne!(cpu.pc, START_ADDRESS + 4);
+        assert_eq!(cpu.pc, START_ADDRESS + 2);
+    }
+
+    #[test]
+    fn test_skip_vx_not_equal_nn() {
+        let mut cpu = CPU::new();
+
+        cpu.v_registers[5] = 0x69;
+        cpu.execute(0x3570);
+        assert_eq!(cpu.pc, START_ADDRESS);
+        cpu.execute(0x3569);
+        assert_eq!(cpu.pc, START_ADDRESS + 2);
+    }
+
+    #[test]
+    fn test_skip_vx_equal_vy() {
+        let mut cpu = CPU::new();
+
+        cpu.v_registers[0] = 0x69;
+        cpu.v_registers[15] = 0x69;
+        cpu.execute(0x50F0);
+        assert_eq!(cpu.pc, START_ADDRESS + 2);
+        cpu.execute(0x5010);
+        assert_eq!(cpu.pc, START_ADDRESS + 2);
+    }
+
+    #[test]
+    fn test_set_vx_to_nn() {
+        let mut cpu = CPU::new();
+
+        cpu.execute(0x6769);
+        assert_eq!(cpu.v_registers[7], 0x69);
+    }
+
+    #[test]
+    fn test_add_nn_to_vx() {
+        let mut cpu = CPU::new();
+
+        cpu.v_registers[3] = 255;
+        cpu.execute(0x7302);
+        assert_eq!(cpu.v_registers[3], 1);
     }
 }
