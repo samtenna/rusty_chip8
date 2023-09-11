@@ -89,10 +89,17 @@ impl CPU {
         self.keys[index] = pressed;
     }
 
+    pub fn load(&mut self, data: &[u8]) {
+        let start = START_ADDRESS as usize;
+        let end = START_ADDRESS as usize + data.len();
+
+        self.memory[start..end].copy_from_slice(&data);
+    }
+
     fn fetch(&mut self) -> u16 {
         let higher_byte = self.memory[self.pc as usize] as u16;
         let lower_byte = self.memory[(self.pc + 1) as usize] as u16;
-        self.pc += 1;
+        self.pc += 2;
         (higher_byte << 8) | lower_byte
     }
 
