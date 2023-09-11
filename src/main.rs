@@ -56,6 +56,10 @@ fn main() {
                 Event::KeyUp {
                     keycode: Some(key), ..
                 } => {
+                    if key == Keycode::Escape {
+                        break 'gameloop;
+                    }
+
                     if let Some(k) = convert_key_to_button(key) {
                         cpu.keypress(k, false);
                     }
