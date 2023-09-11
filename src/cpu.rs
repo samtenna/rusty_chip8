@@ -83,6 +83,7 @@ impl CPU {
     pub fn tick(&mut self) {
         let op = self.fetch();
         self.execute(op);
+        self.tick_timers();
     }
 
     pub fn keypress(&mut self, index: usize, pressed: bool) {
