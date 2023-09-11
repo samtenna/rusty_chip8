@@ -7,7 +7,7 @@ use cpu::{CPU, SCREEN_HEIGHT, SCREEN_WIDTH};
 
 mod cpu;
 
-const SCALE: u32 = 10;
+const SCALE: u32 = 15;
 const WINDOW_WIDTH: u32 = (SCREEN_WIDTH as u32) * SCALE;
 const WINDOW_HEIGHT: u32 = (SCREEN_HEIGHT as u32) * SCALE;
 const TICKS_PER_FRAME: u32 = 10;
