@@ -1,3 +1,5 @@
+use rand::random;
+
 pub const SCREEN_WIDTH: usize = 64;
 pub const SCREEN_HEIGHT: usize = 32;
 
@@ -33,7 +35,7 @@ pub struct CPU {
     pc: u16,
     memory: [u8; MEMORY_SIZE],
     // pixels don't have colours, they are either on or off
-    screen: [bool; SCREEN_WIDTH * SCREEN_HEIGHT],
+    pub screen: [bool; SCREEN_WIDTH * SCREEN_HEIGHT],
     v_registers: [u8; NUM_V_REGISTERS],
     index_register: u16,
     stack: [u16; STACK_SIZE],
@@ -81,6 +83,10 @@ impl CPU {
     pub fn tick(&mut self) {
         let op = self.fetch();
         self.execute(op);
+    }
+
+    pub fn keypress(&mut self, index: usize, pressed: bool) {
+        self.keys[index] = pressed;
     }
 
     fn fetch(&mut self) -> u16 {
@@ -239,6 +245,163 @@ impl CPU {
 
                 self.v_registers[vx] <<= 1;
                 self.v_registers[0xF] = leftmost_bit;
+            }
+            // SKIP VX != VY
+            (9, _, _, 0) => {
+                let vx = digit_two as usize;
+                let vy = digit_three as usize;
+
+                if self.v_registers[vx] != self.v_registers[vy] {
+                    self.pc += 2;
+                }
+            }
+            // I = NNN
+            (0xA, _, _, _) => {
+                let nnn = op & 0x0FFF;
+
+                self.index_register = nnn;
+            }
+            // JUMP V0 + NNN
+            (0xB, _, _, _) => {
+                let nnn = op & 0x0FFF;
+
+                self.pc = self.v_registers[0] as u16 + nnn;
+            }
+            // VX = RAND() & NN
+            (0xC, _, _, _) => {
+                let vx = digit_two as usize;
+                let nn = (op & 0x00FF) as u8;
+                let rng: u8 = random();
+
+                self.v_registers[vx] = rng & nn;
+            }
+            // DRAW
+            (0xD, _, _, _) => {
+                let draw_x = self.v_registers[digit_two as usize] as u16;
+                let draw_y = self.v_registers[digit_three as usize] as u16;
+                let height = digit_four;
+
+                let mut pixels_flipped = false;
+
+                for current_y in 0..height {
+                    let address = self.index_register + current_y as u16;
+                    let row_pixels = self.memory[address as usize];
+
+                    for current_x in 0..8 {
+                        if (row_pixels & (0b1000_0000 >> current_x)) != 0 {
+                            let x = (draw_x + current_x) as usize % SCREEN_WIDTH;
+                            let y = (draw_y + current_y) as usize % SCREEN_HEIGHT;
+
+                            let index = x + SCREEN_WIDTH * y;
+
+                            pixels_flipped |= self.screen[index];
+                            self.screen[index] ^= true;
+                        }
+                    }
+                }
+
+                self.v_registers[0xF] = if pixels_flipped { 1 } else { 0 };
+            }
+            // SKIP IF KEY PRESSED
+            (0xE, _, 9, 0xE) => {
+                let vx = digit_two as usize;
+                let key_pressed = self.keys[self.v_registers[vx] as usize];
+
+                if key_pressed {
+                    self.pc += 2;
+                }
+            }
+            // SKIP IF KEY NOT PRESSED
+            (0xE, _, 0xA, 1) => {
+                let vx = digit_two as usize;
+                let key_pressed = self.keys[self.v_registers[vx] as usize];
+
+                if !key_pressed {
+                    self.pc += 2;
+                }
+            }
+            // VX = DT
+            (0xF, _, 0, 7) => {
+                let vx = digit_two as usize;
+
+                self.v_registers[vx] = self.delay_timer;
+            }
+            // WAIT FOR KEY PRESS
+            (0xF, _, 0, 0xA) => {
+                let vx = digit_two as usize;
+                let mut pressed = false;
+
+                for i in 0..self.keys.len() {
+                    if self.keys[i] {
+                        self.v_registers[vx] = i as u8;
+                        pressed = true;
+                        break;
+                    }
+                }
+
+                if !pressed {
+                    self.pc -= 2;
+                }
+            }
+            // DT = VX
+            (0xF, _, 1, 5) => {
+                let vx = digit_two as usize;
+
+                self.delay_timer = self.v_registers[vx];
+            }
+            // ST = VX
+            (0xF, _, 1, 8) => {
+                let vx = digit_two as usize;
+
+                self.sound_timer = self.v_registers[vx];
+            }
+            // I += VX
+            (0xF, _, 1, 0xE) => {
+                let vx = digit_two as usize;
+
+                self.index_register = self
+                    .index_register
+                    .wrapping_add(self.v_registers[vx] as u16);
+            }
+            // I = FONT
+            (0xF, _, 2, 9) => {
+                let vx = digit_two as usize;
+                let char = self.v_registers[vx] as u16;
+
+                self.index_register = char * 5;
+            }
+            // BCD
+            (0xF, _, 3, 3) => {
+                let vx = digit_two as usize;
+                let mut vx_value = self.v_registers[vx] as f32;
+
+                let hundreds = (vx_value / 100.0).floor() as u8;
+                vx_value %= 100.0;
+                let tens = (vx_value / 10.0).floor() as u8;
+                vx_value %= 10.0;
+                let ones = vx_value.floor() as u8;
+
+                self.memory[self.index_register as usize] = hundreds;
+                self.memory[(self.index_register + 1) as usize] = tens;
+                self.memory[(self.index_register + 2) as usize] = ones;
+            }
+            // STORE V0 - VX
+            (0xF, _, 5, 5) => {
+                let vx = digit_two as usize;
+                let memory_start = self.index_register as usize;
+
+                for i in 0..=vx as usize {
+                    self.memory[memory_start + i] = self.v_registers[i];
+                }
+            }
+            // LOAD V0 - VX
+            (0xF, _, 6, 5) => {
+                let vx = digit_two as usize;
+                let memory_start = self.index_register as usize;
+
+                for i in 0..=vx as usize {
+                    self.v_registers[i] = self.memory[memory_start + i];
+                }
             }
             (_, _, _, _) => panic!("unknown opcode: {:#x}", op),
         }
@@ -494,5 +657,191 @@ mod tests {
         cpu.execute(0x800E);
         assert_eq!(cpu.v_registers[0], 0b1010_1010);
         assert_eq!(cpu.v_registers[0xF], 0);
+    }
+
+    #[test]
+    fn test_skip_vx_not_equal_vy() {
+        let mut cpu = CPU::new();
+
+        cpu.v_registers[0] = 1;
+        cpu.execute(0x9010);
+        assert_eq!(cpu.pc, START_ADDRESS + 2);
+
+        cpu.v_registers[0] = 0;
+        cpu.execute(0x9010);
+        assert_eq!(cpu.pc, START_ADDRESS + 2)
+    }
+
+    #[test]
+    fn test_set_i_nnn() {
+        let mut cpu = CPU::new();
+
+        cpu.execute(0xA420);
+        assert_eq!(cpu.index_register, 0x420);
+    }
+
+    #[test]
+    fn test_jump_v0_nnn() {
+        let mut cpu = CPU::new();
+
+        cpu.v_registers[0] = 69;
+        cpu.execute(0xB420);
+        assert_eq!(cpu.pc, 69 + 0x420);
+    }
+
+    // NOTE: test for the random opcode is omitted on account of the fact it's random
+
+    #[test]
+    fn test_draw() {
+        let mut cpu = CPU::new();
+
+        // draws a plus
+        // 01000000
+        // 11100000
+        // 01000000
+        let sprite = [0x40, 0xE0, 0x40];
+        cpu.memory[(START_ADDRESS + 4) as usize..(START_ADDRESS + 7) as usize]
+            .copy_from_slice(&sprite);
+        cpu.v_registers[0] = 10;
+        cpu.v_registers[1] = 10;
+        cpu.index_register = START_ADDRESS + 4;
+        cpu.execute(0xD013);
+
+        assert_eq!(cpu.screen[650], false);
+        assert_eq!(cpu.screen[651], true);
+        assert_eq!(cpu.screen[652], false);
+
+        assert_eq!(cpu.screen[714], true);
+        assert_eq!(cpu.screen[715], true);
+        assert_eq!(cpu.screen[716], true);
+
+        assert_eq!(cpu.screen[778], false);
+        assert_eq!(cpu.screen[779], true);
+        assert_eq!(cpu.screen[780], false);
+    }
+
+    #[test]
+    fn test_skip_key_pressed() {
+        let mut cpu = CPU::new();
+
+        cpu.v_registers[0xA] = 2;
+        cpu.keys[2] = true;
+        cpu.execute(0xEA9E);
+        assert_eq!(cpu.pc, START_ADDRESS + 2);
+
+        cpu.keys[2] = false;
+        cpu.execute(0xEA9E);
+        assert_eq!(cpu.pc, START_ADDRESS + 2);
+    }
+
+    #[test]
+    fn test_skip_key_not_pressed() {
+        let mut cpu = CPU::new();
+
+        cpu.v_registers[0xA] = 2;
+        cpu.keys[2] = false;
+        cpu.execute(0xEA9E);
+        assert_eq!(cpu.pc, START_ADDRESS);
+
+        cpu.keys[2] = true;
+        cpu.execute(0xEA9E);
+        assert_eq!(cpu.pc, START_ADDRESS + 2);
+    }
+
+    #[test]
+    fn test_set_vx_dt() {
+        let mut cpu = CPU::new();
+
+        cpu.delay_timer = 69;
+        cpu.execute(0xF407);
+        assert_eq!(cpu.v_registers[4], 69);
+    }
+
+    #[test]
+    fn test_wait_for_key() {
+        let mut cpu = CPU::new();
+
+        cpu.keys[0xD] = true;
+        cpu.execute(0xF80A);
+        assert_eq!(cpu.v_registers[8], 0xD);
+
+        // TODO: can't test the waiting functionality in this way, requires multiple cycles - change
+    }
+
+    #[test]
+    fn test_set_dt_vx() {
+        let mut cpu = CPU::new();
+
+        cpu.v_registers[0xE] = 42;
+        cpu.execute(0xFE15);
+        assert_eq!(cpu.delay_timer, 42);
+    }
+
+    #[test]
+    fn test_set_st_vx() {
+        let mut cpu = CPU::new();
+
+        cpu.v_registers[0xE] = 42;
+        cpu.execute(0xFE18);
+        assert_eq!(cpu.sound_timer, 42);
+    }
+
+    #[test]
+    fn test_i_add_vx() {
+        let mut cpu = CPU::new();
+
+        cpu.v_registers[0xB] = 9;
+        cpu.index_register = 10;
+        cpu.execute(0xFB1E);
+        assert_eq!(cpu.index_register, 19);
+    }
+
+    #[test]
+    fn test_set_i_font_location() {
+        let mut cpu = CPU::new();
+
+        cpu.v_registers[2] = 7;
+        cpu.execute(0xF229);
+        assert_eq!(cpu.index_register, 7 * 5);
+    }
+
+    #[test]
+    fn test_bcd() {
+        let mut cpu = CPU::new();
+
+        cpu.v_registers[0] = 123;
+        cpu.index_register = 69;
+        cpu.execute(0xF033);
+        assert_eq!(cpu.memory[69], 1);
+        assert_eq!(cpu.memory[70], 2);
+        assert_eq!(cpu.memory[71], 3);
+    }
+
+    #[test]
+    fn test_store_v0_vx() {
+        let mut cpu = CPU::new();
+
+        cpu.v_registers[0] = 1;
+        cpu.v_registers[1] = 2;
+        cpu.v_registers[2] = 3;
+        cpu.index_register = START_ADDRESS + 10;
+        cpu.execute(0xF255);
+        assert_eq!(cpu.memory[(START_ADDRESS + 10) as usize], 1);
+        assert_eq!(cpu.memory[(START_ADDRESS + 11) as usize], 2);
+        assert_eq!(cpu.memory[(START_ADDRESS + 12) as usize], 3);
+    }
+
+    #[test]
+    fn test_load_v0_vx() {
+        let mut cpu = CPU::new();
+
+        cpu.memory[(START_ADDRESS + 10) as usize] = 1;
+        cpu.memory[(START_ADDRESS + 11) as usize] = 2;
+        cpu.memory[(START_ADDRESS + 12) as usize] = 3;
+        cpu.index_register = START_ADDRESS + 10;
+        cpu.execute(0xF265);
+        assert_eq!(cpu.v_registers[0], 1);
+        assert_eq!(cpu.v_registers[1], 2);
+        assert_eq!(cpu.v_registers[2], 3);
     }
 }
