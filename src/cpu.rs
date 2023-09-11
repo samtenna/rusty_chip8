@@ -231,6 +231,15 @@ impl CPU {
                 self.v_registers[0xF] = if underflow { 0 } else { 1 };
                 self.v_registers[vx] = result;
             }
+            // VX << 1
+            (8, _, _, 0xE) => {
+                let vx = digit_two as usize;
+                // NOTE: may need & 1
+                let leftmost_bit = self.v_registers[vx] >> 7;
+
+                self.v_registers[vx] <<= 1;
+                self.v_registers[0xF] = leftmost_bit;
+            }
             (_, _, _, _) => panic!("unknown opcode: {:#x}", op),
         }
     }
@@ -470,5 +479,20 @@ mod tests {
         cpu.execute(0x8017);
         assert_eq!(cpu.v_registers[0], 1);
         assert_eq!(cpu.v_registers[0xF], 1);
+    }
+
+    #[test]
+    fn test_vx_shift_left() {
+        let mut cpu = CPU::new();
+
+        cpu.v_registers[0] = 0b1010_1010;
+        cpu.execute(0x800E);
+        assert_eq!(cpu.v_registers[0], 0b0101_0100);
+        assert_eq!(cpu.v_registers[0xF], 1);
+
+        cpu.v_registers[0] = 0b0101_0101;
+        cpu.execute(0x800E);
+        assert_eq!(cpu.v_registers[0], 0b1010_1010);
+        assert_eq!(cpu.v_registers[0xF], 0);
     }
 }
