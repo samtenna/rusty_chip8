@@ -1,8 +1,6 @@
 # Rusty CHIP-8
 
-![Rust](https://img.shields.io/badge/Rust-000000?style=for-the-badge&logo=rust&logoColor=white)
-![SDL2](https://img.shields.io/badge/SDL2-225699?style=for-the-badge&logo=sdl2&logoColor=white)
-[![Tests](https://img.shields.io/github/actions/workflow/status/samtenna/rusty_chip8/ci.yml?style=for-the-badge&label=Tests)](https://github.com/samtenna/rusty_chip8/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/github/actions/workflow/status/samtenna/rusty_chip8/ci.yml?label=Tests)](https://github.com/samtenna/rusty_chip8/actions/workflows/ci.yml)
 
 A fully featured CHIP8 emulator written in Rust. This project was built to explore CPU emulation, bitwise operations, and memory management in a low level systems language.
 
